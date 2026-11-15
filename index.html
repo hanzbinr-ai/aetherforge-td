@@ -49,13 +49,13 @@
       <div>Gudang Besar Lv.<span id="wh-lv">1</span></div>
       <button onclick="upgradeWarehouse()">Upgrade Gudang</button>
       <div style="margin-top:10px; font-size:13px; color:#aaa;">
-        Berhasil defend mining untuk naik level.
+        Setelah battle, 50% biaya tower dikembalikan ke gudang.
       </div>
     </div>
   </div>
 
   <div id="game-container">
-    <button id="back" onclick="showMenu()" style="display:none;">← Kembali</button>
+    <button id="back" onclick="endBattle(false)" style="display:none;">← Kembali</button>
     <canvas id="game" width="800" height="560"></canvas>
   </div>
 
@@ -72,6 +72,7 @@ let warehouseLevel = 1;
 let baseHP = 100, wave = 1, resource = 0, placeMode = null;
 let enemies = [], towers = [], projectiles = [], particles = [];
 let waveActive = false, frame = 0;
+let totalSpentOnTowers = 0;
 
 const path = [{x:40,y:280},{x:200,y:280},{x:200,y:100},{x:450,y:100},{x:450,y:400},{x:760,y:400}];
 
@@ -92,6 +93,31 @@ function showMenu() {
   updateMenu();
 }
 
+function endBattle(success) {
+  // Refund 50% of tower costs
+  const refund = Math.floor(totalSpentOnTowers * 0.5);
+  if (refund > 0) {
+    warehouse += refund;
+  }
+
+  let msg = '';
+  if (success && currentMode === 'mining') {
+    miningLevels[miningType]++;
+    const bonus = 40 + miningLevels[miningType] * 10;
+    warehouse += bonus;
+    msg = `Berhasil! Mining naik level.\nRefund tower: +${refund}\nBonus: +${bonus}`;
+  } else if (success && currentMode === 'campaign') {
+    warehouse += 35;
+    msg = `Campaign selesai!\nRefund tower: +${refund}\nBonus: +35`;
+  } else {
+    msg = refund > 0 ? `Battle berakhir.\nRefund 50% tower: +${refund}` : 'Battle berakhir.';
+  }
+
+  if (msg) alert(msg);
+  totalSpentOnTowers = 0;
+  showMenu();
+}
+
 function startBattle(mode, extra) {
   currentMode = mode;
   miningType = extra || null;
@@ -101,11 +127,12 @@ function startBattle(mode, extra) {
 
   baseHP = 100;
   wave = 1;
-  // Always give enough to build several towers
+  totalSpentOnTowers = 0;
+
   const bring = Math.min(100 + warehouseLevel * 15, Math.max(warehouse, 80));
   resource = bring;
   if (warehouse >= bring) warehouse -= bring;
-  else warehouse = 0;
+  else warehouse = Math.max(0, warehouse - bring);
 
   enemies = []; towers = []; projectiles = []; particles = [];
   waveActive = false;
@@ -146,8 +173,9 @@ canvas.addEventListener('click', e => {
   const y = e.clientY - rect.top;
   const cost = placeMode === 'totem' ? 20 : 25;
   if (resource >= cost) {
-    towers.push({ x, y, type: placeMode, range: 120, cooldown: 0 });
+    towers.push({ x, y, type: placeMode, range: 120, cooldown: 0, cost });
     resource -= cost;
+    totalSpentOnTowers += cost;
     spawnParticles(x, y, placeMode === 'totem' ? '#e67e22' : '#2ecc71', 12);
     document.getElementById('bat-res').textContent = resource;
   }
@@ -190,7 +218,6 @@ function gameLoop() {
   frame++;
   ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-  // Path
   ctx.strokeStyle = '#3a3a3a';
   ctx.lineWidth = 34;
   ctx.lineCap = 'round';
@@ -199,14 +226,12 @@ function gameLoop() {
   path.forEach(p => ctx.lineTo(p.x, p.y));
   ctx.stroke();
 
-  // Base
   ctx.fillStyle = '#16a085';
   ctx.fillRect(720, 340, 55, 90);
   ctx.fillStyle = '#fff';
   ctx.font = 'bold 12px sans-serif';
   ctx.fillText('BASE', 730, 390);
 
-  // Enemies
   enemies = enemies.filter(e => {
     if (e.hp <= 0) {
       spawnParticles(e.x, e.y, '#e74c3c', 10);
@@ -235,32 +260,22 @@ function gameLoop() {
     return true;
   });
 
-  // Towers
   towers.forEach(t => {
     ctx.fillStyle = t.type === 'totem' ? '#e67e22' : '#27ae60';
     ctx.beginPath();
     ctx.arc(t.x, t.y, 16, 0, Math.PI * 2);
     ctx.fill();
-    ctx.strokeStyle = 'rgba(255,255,255,0.15)';
-    ctx.stroke();
 
     t.cooldown--;
     if (t.cooldown <= 0) {
       const tgt = enemies.find(en => Math.hypot(en.x - t.x, en.y - t.y) < t.range);
       if (tgt) {
-        projectiles.push({
-          x: t.x, y: t.y,
-          tx: tgt.x, ty: tgt.y,
-          dmg: t.type === 'totem' ? 11 : 6,
-          type: t.type
-        });
+        projectiles.push({ x: t.x, y: t.y, tx: tgt.x, ty: tgt.y, dmg: t.type === 'totem' ? 11 : 6, type: t.type });
         t.cooldown = t.type === 'totem' ? 28 : 48;
-        spawnParticles(t.x, t.y, t.type === 'totem' ? '#f39c12' : '#2ecc71', 3);
       }
     }
   });
 
-  // Projectiles
   projectiles = projectiles.filter(p => {
     const dx = p.tx - p.x, dy = p.ty - p.y;
     const d = Math.hypot(dx, dy);
@@ -279,7 +294,6 @@ function gameLoop() {
     return true;
   });
 
-  // Particles
   particles = particles.filter(p => {
     p.x += p.vx; p.y += p.vy; p.life--;
     ctx.globalAlpha = Math.max(0, p.life / 30);
@@ -297,23 +311,17 @@ function gameLoop() {
     resource += 12;
 
     if (currentMode === 'mining' && wave > 4) {
-      miningLevels[miningType]++;
-      warehouse += 40 + miningLevels[miningType] * 10;
-      alert(`Berhasil! ${miningType} naik ke Level ${miningLevels[miningType]}`);
-      showMenu();
+      endBattle(true);
       return;
     }
     if (currentMode === 'campaign' && wave > 6) {
-      warehouse += 35;
-      alert('Campaign selesai! +35 resource ke gudang');
-      showMenu();
+      endBattle(true);
       return;
     }
   }
 
   if (baseHP <= 0) {
-    alert('Base hancur. Coba lagi.');
-    showMenu();
+    endBattle(false);
     return;
   }
 
