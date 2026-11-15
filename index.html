@@ -1,0 +1,193 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Aetherforge TD - Prototype</title>
+  <style>
+    body { margin: 0; background: #1a1a1a; display: flex; justify-content: center; align-items: center; height: 100vh; font-family: sans-serif; }
+    canvas { border: 2px solid #444; background: #2d2d2d; }
+    #ui { position: absolute; top: 10px; left: 10px; color: white; }
+    button { margin: 5px; padding: 8px 12px; }
+  </style>
+</head>
+<body>
+  <div id="ui">
+    <div>Base HP: <span id="hp">100</span></div>
+    <div>Wave: <span id="wave">1</span></div>
+    <div>Resource: <span id="res">50</span></div>
+    <button onclick="placeMode='totem'">Totem Api (20)</button>
+    <button onclick="placeMode='poison'">Tanaman Beracun (25)</button>
+    <button onclick="startWave()">Start Wave</button>
+  </div>
+  <canvas id="game" width="800" height="600"></canvas>
+
+<script>
+const canvas = document.getElementById('game');
+const ctx = canvas.getContext('2d');
+
+let baseHP = 100;
+let wave = 1;
+let resource = 50;
+let placeMode = null;
+let enemies = [];
+let towers = [];
+let projectiles = [];
+let waveActive = false;
+
+const path = [
+  {x: 0, y: 300},
+  {x: 200, y: 300},
+  {x: 200, y: 150},
+  {x: 500, y: 150},
+  {x: 500, y: 450},
+  {x: 800, y: 450}
+];
+
+function updateUI() {
+  document.getElementById('hp').textContent = baseHP;
+  document.getElementById('wave').textContent = wave;
+  document.getElementById('res').textContent = resource;
+}
+
+canvas.addEventListener('click', (e) => {
+  if (!placeMode) return;
+  const rect = canvas.getBoundingClientRect();
+  const x = e.clientX - rect.left;
+  const y = e.clientY - rect.top;
+  const cost = placeMode === 'totem' ? 20 : 25;
+  if (resource >= cost) {
+    towers.push({ x, y, type: placeMode, range: 100, cooldown: 0, level: 1 });
+    resource -= cost;
+    updateUI();
+  }
+  placeMode = null;
+});
+
+function startWave() {
+  if (waveActive) return;
+  waveActive = true;
+  for (let i = 0; i < 5 + wave * 2; i++) {
+    setTimeout(() => {
+      enemies.push({
+        x: path[0].x,
+        y: path[0].y,
+        hp: 20 + wave * 10,
+        maxHp: 20 + wave * 10,
+        speed: 1,
+        pathIndex: 0,
+        progress: 0
+      });
+    }, i * 800);
+  }
+}
+
+function gameLoop() {
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+  // Draw path
+  ctx.strokeStyle = '#666';
+  ctx.lineWidth = 30;
+  ctx.beginPath();
+  ctx.moveTo(path[0].x, path[0].y);
+  for (let p of path) ctx.lineTo(p.x, p.y);
+  ctx.stroke();
+
+  // Draw base
+  ctx.fillStyle = '#4a9';
+  ctx.fillRect(750, 400, 40, 80);
+  ctx.fillStyle = 'white';
+  ctx.font = '12px sans-serif';
+  ctx.fillText('BASE', 752, 445);
+
+  // Update & draw enemies
+  enemies = enemies.filter(e => {
+    if (e.hp <= 0) {
+      resource += 5;
+      updateUI();
+      return false;
+    }
+
+    const target = path[e.pathIndex + 1];
+    if (!target) {
+      baseHP -= 10;
+      updateUI();
+      if (baseHP <= 0) alert('Base Destroyed! Refresh to restart.');
+      return false;
+    }
+
+    const dx = target.x - e.x;
+    const dy = target.y - e.y;
+    const dist = Math.hypot(dx, dy);
+    if (dist < e.speed) {
+      e.pathIndex++;
+    } else {
+      e.x += (dx / dist) * e.speed;
+      e.y += (dy / dist) * e.speed;
+    }
+
+    // Draw enemy
+    ctx.fillStyle = '#c44';
+    ctx.beginPath();
+    ctx.arc(e.x, e.y, 12, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = '#fff';
+    ctx.fillRect(e.x - 15, e.y - 20, 30 * (e.hp / e.maxHp), 4);
+
+    return true;
+  });
+
+  // Towers
+  towers.forEach(t => {
+    ctx.fillStyle = t.type === 'totem' ? '#e81' : '#6b4';
+    ctx.beginPath();
+    ctx.arc(t.x, t.y, 16, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(255,255,255,0.2)';
+    ctx.beginPath();
+    ctx.arc(t.x, t.y, t.range, 0, Math.PI * 2);
+    ctx.stroke();
+
+    t.cooldown--;
+    if (t.cooldown <= 0) {
+      const target = enemies.find(e => Math.hypot(e.x - t.x, e.y - t.y) < t.range);
+      if (target) {
+        projectiles.push({ x: t.x, y: t.y, tx: target.x, ty: target.y, damage: t.type === 'totem' ? 8 : 5, type: t.type });
+        t.cooldown = t.type === 'totem' ? 40 : 60;
+      }
+    }
+  });
+
+  // Projectiles
+  projectiles = projectiles.filter(p => {
+    const dx = p.tx - p.x;
+    const dy = p.ty - p.y;
+    const dist = Math.hypot(dx, dy);
+    if (dist < 5) {
+      const hit = enemies.find(e => Math.hypot(e.x - p.tx, e.y - p.ty) < 20);
+      if (hit) hit.hp -= p.damage;
+      return false;
+    }
+    p.x += (dx / dist) * 6;
+    p.y += (dy / dist) * 6;
+    ctx.fillStyle = p.type === 'totem' ? '#fa0' : '#af0';
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, 4, 0, Math.PI * 2);
+    ctx.fill();
+    return true;
+  });
+
+  if (waveActive && enemies.length === 0) {
+    waveActive = false;
+    wave++;
+    resource += 20;
+    updateUI();
+  }
+
+  requestAnimationFrame(gameLoop);
+}
+
+updateUI();
+gameLoop();
+</script>
+</body>
+</html>
