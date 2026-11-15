@@ -2,79 +2,138 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>Aetherforge TD - Prototype</title>
+  <title>Aetherforge TD</title>
   <style>
-    body { margin: 0; background: #111; display: flex; justify-content: center; align-items: center; height: 100vh; font-family: 'Segoe UI', sans-serif; overflow: hidden; }
-    canvas { border: 3px solid #333; background: #1e1e1e; box-shadow: 0 0 30px rgba(0,0,0,0.8); border-radius: 8px; }
-    #ui { position: absolute; top: 15px; left: 15px; color: #eee; background: rgba(0,0,0,0.6); padding: 12px 16px; border-radius: 10px; backdrop-filter: blur(4px); }
-    button { margin: 4px; padding: 8px 14px; border: none; border-radius: 6px; cursor: pointer; font-weight: bold; transition: 0.2s; }
-    button:hover { transform: translateY(-1px); filter: brightness(1.1); }
-    .totem { background: #e67e22; color: white; }
-    .poison { background: #27ae60; color: white; }
-    .start { background: #2980b9; color: white; }
+    body { margin: 0; background: #0f0f0f; color: #eee; font-family: 'Segoe UI', system-ui, sans-serif; display: flex; height: 100vh; }
+    #menu { width: 320px; background: #1a1a1a; padding: 20px; box-sizing: border-box; border-right: 2px solid #333; overflow-y: auto; }
+    #game-container { flex: 1; display: flex; justify-content: center; align-items: center; position: relative; }
+    canvas { background: #1e1e1e; border-radius: 8px; box-shadow: 0 0 20px #000; }
+    h2 { margin: 0 0 10px; color: #f39c12; }
+    .section { margin-bottom: 25px; }
+    .site, .map-node {
+      background: #252525; margin: 8px 0; padding: 12px; border-radius: 8px; cursor: pointer;
+      border: 2px solid #333; transition: 0.2s;
+    }
+    .site:hover, .map-node:hover { border-color: #f39c12; transform: translateY(-2px); }
+    .site.active { border-color: #27ae60; }
+    button { background: #2980b9; color: white; border: none; padding: 8px 14px; border-radius: 6px; cursor: pointer; margin: 4px; }
+    button:hover { filter: brightness(1.15); }
+    .res { font-size: 18px; color: #2ecc71; }
+    #back { position: absolute; top: 15px; left: 340px; z-index: 10; }
   </style>
 </head>
 <body>
-  <div id="ui">
-    <div>Base HP: <span id="hp">100</span></div>
-    <div>Wave: <span id="wave">1</span></div>
-    <div>Resource: <span id="res">80</span></div>
-    <div style="margin-top:8px; font-size:12px; color:#aaa;">Resource dari gudang (bukan dari kill)</div>
-    <button class="totem" onclick="placeMode='totem'">Totem Api (20)</button>
-    <button class="poison" onclick="placeMode='poison'">Tanaman Beracun (25)</button>
-    <button class="start" onclick="startWave()">Start Wave</button>
+  <div id="menu">
+    <h2>Aetherforge</h2>
+    <div class="res">Gudang: <span id="warehouse">120</span> Resource</div>
+    <hr style="border-color:#333; margin:15px 0;">
+
+    <div class="section">
+      <h3>Campaign</h3>
+      <div class="map-node" onclick="startCampaign(1)">Stone Age - Path 1</div>
+      <div class="map-node" onclick="startCampaign(2)">Stone Age - Path 2</div>
+      <div class="map-node" style="opacity:0.5;">Classical (Locked)</div>
+    </div>
+
+    <div class="section">
+      <h3>Mining Sites</h3>
+      <div class="site" onclick="startMining('grove')">
+        Sacred Grove<br><small>Essence + Kayu | Lv.<span id="grove-lv">1</span> | +<span id="grove-out">8</span>/jam</small>
+      </div>
+      <div class="site" onclick="startMining('rock')">
+        Rocky Outcrop<br><small>Batu | Lv.<span id="rock-lv">1</span> | +<span id="rock-out">6</span>/jam</small>
+      </div>
+    </div>
+
+    <div class="section">
+      <h3>Base Building</h3>
+      <div>Gudang Besar Lv.<span id="wh-lv">1</span></div>
+      <button onclick="upgradeWarehouse()">Upgrade Gudang (+Kapasitas)</button>
+      <div style="margin-top:10px; font-size:13px; color:#aaa;">
+        Upgrade mining dengan berhasil defend site.
+      </div>
+    </div>
   </div>
-  <canvas id="game" width="900" height="600"></canvas>
+
+  <div id="game-container">
+    <button id="back" onclick="showMenu()" style="display:none;">← Kembali ke Map</button>
+    <canvas id="game" width="800" height="560"></canvas>
+  </div>
 
 <script>
 const canvas = document.getElementById('game');
 const ctx = canvas.getContext('2d');
 
-let baseHP = 100;
-let wave = 1;
-let resource = 80;
-let placeMode = null;
-let enemies = [];
-let towers = [];
-let projectiles = [];
-let particles = [];
-let waveActive = false;
-let frame = 0;
+let warehouse = 120;
+let currentMode = null; // 'campaign' or 'mining'
+let miningType = null;
+let miningLevels = { grove: 1, rock: 1 };
+let warehouseLevel = 1;
 
-const path = [
-  {x: 50, y: 300}, {x: 220, y: 300}, {x: 220, y: 120},
-  {x: 480, y: 120}, {x: 480, y: 420}, {x: 850, y: 420}
-];
+let baseHP = 100, wave = 1, resource = 0, placeMode = null;
+let enemies = [], towers = [], projectiles = [], particles = [];
+let waveActive = false, frame = 0;
 
-function updateUI() {
-  document.getElementById('hp').textContent = Math.max(0, baseHP);
-  document.getElementById('wave').textContent = wave;
-  document.getElementById('res').textContent = resource;
+const path = [{x:40,y:280},{x:200,y:280},{x:200,y:100},{x:450,y:100},{x:450,y:400},{x:760,y:400}];
+
+function updateMenu() {
+  document.getElementById('warehouse').textContent = warehouse;
+  document.getElementById('grove-lv').textContent = miningLevels.grove;
+  document.getElementById('rock-lv').textContent = miningLevels.rock;
+  document.getElementById('grove-out').textContent = 8 + (miningLevels.grove-1)*6;
+  document.getElementById('rock-out').textContent = 6 + (miningLevels.rock-1)*5;
+  document.getElementById('wh-lv').textContent = warehouseLevel;
 }
 
-function spawnParticles(x, y, color, count = 8) {
-  for (let i = 0; i < count; i++) {
-    particles.push({
-      x, y,
-      vx: (Math.random() - 0.5) * 4,
-      vy: (Math.random() - 0.5) * 4,
-      life: 30 + Math.random() * 20,
-      color
-    });
-  }
+function showMenu() {
+  document.getElementById('menu').style.display = 'block';
+  document.getElementById('back').style.display = 'none';
+  canvas.style.display = 'none';
+  currentMode = null;
 }
 
-canvas.addEventListener('click', (e) => {
+function startBattle(mode, extra) {
+  currentMode = mode;
+  miningType = extra || null;
+  document.getElementById('menu').style.display = 'none';
+  document.getElementById('back').style.display = 'block';
+  canvas.style.display = 'block';
+
+  // Reset battle
+  baseHP = 100;
+  wave = 1;
+  resource = Math.min(60 + warehouseLevel * 20, warehouse);
+  warehouse -= resource;
+  enemies = []; towers = []; projectiles = []; particles = [];
+  waveActive = false;
+  updateMenu();
+}
+
+function startCampaign(id) { startBattle('campaign'); }
+function startMining(type) { startBattle('mining', type); }
+
+function upgradeWarehouse() {
+  const cost = 40 + warehouseLevel * 30;
+  if (warehouse >= cost) {
+    warehouse -= cost;
+    warehouseLevel++;
+    updateMenu();
+  } else alert('Resource gudang tidak cukup');
+}
+
+function spawnParticles(x, y, color, count=8) {
+  for (let i=0;i<count;i++) particles.push({x,y,vx:(Math.random()-0.5)*5,vy:(Math.random()-0.5)*5,life:25+Math.random()*15,color});
+}
+
+canvas.addEventListener('click', e => {
   if (!placeMode) return;
   const rect = canvas.getBoundingClientRect();
-  const x = e.clientX - rect.left;
-  const y = e.clientY - rect.top;
-  const cost = placeMode === 'totem' ? 20 : 25;
+  const x = e.clientX - rect.left, y = e.clientY - rect.top;
+  const cost = placeMode==='totem'?20:25;
   if (resource >= cost) {
-    towers.push({ x, y, type: placeMode, range: 110, cooldown: 0 });
+    towers.push({x,y,type:placeMode,range:110,cooldown:0});
     resource -= cost;
-    spawnParticles(x, y, placeMode === 'totem' ? '#e67e22' : '#2ecc71', 12);
-    updateUI();
+    spawnParticles(x,y, placeMode==='totem'?'#e67e22':'#2ecc71',10);
   }
   placeMode = null;
 });
@@ -82,206 +141,114 @@ canvas.addEventListener('click', (e) => {
 function startWave() {
   if (waveActive) return;
   waveActive = true;
-  const count = 6 + wave * 2;
-  for (let i = 0; i < count; i++) {
-    setTimeout(() => {
-      enemies.push({
-        x: path[0].x, y: path[0].y,
-        hp: 25 + wave * 12,
-        maxHp: 25 + wave * 12,
-        speed: 0.9 + wave * 0.05,
-        pathIndex: 0,
-        wobble: Math.random() * Math.PI * 2
-      });
-    }, i * 700);
+  const count = currentMode==='mining' ? 8 + miningLevels[miningType]*3 : 5 + wave*2;
+  for (let i=0;i<count;i++) {
+    setTimeout(()=>{
+      enemies.push({x:path[0].x,y:path[0].y,hp:30+wave*15,maxHp:30+wave*15,speed:1,pathIndex:0,wobble:Math.random()*6});
+    }, i*600);
   }
 }
 
+// Simple UI overlay buttons for battle
+const battleUI = document.createElement('div');
+battleUI.style.cssText = 'position:absolute; bottom:20px; left:50%; transform:translateX(-50%); display:flex; gap:10px;';
+battleUI.innerHTML = `
+  <button onclick="placeMode='totem'">Totem (20)</button>
+  <button onclick="placeMode='poison'">Tanaman (25)</button>
+  <button onclick="startWave()" style="background:#27ae60;">Start Wave</button>
+  <span style="align-self:center;">Resource: <b id="bat-res">0</b></span>
+`;
+document.getElementById('game-container').appendChild(battleUI);
+
 function gameLoop() {
+  if (!currentMode) { requestAnimationFrame(gameLoop); return; }
   frame++;
-  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  ctx.clearRect(0,0,canvas.width,canvas.height);
 
-  // Background grid subtle
-  ctx.strokeStyle = '#222';
-  ctx.lineWidth = 1;
-  for (let x = 0; x < canvas.width; x += 40) {
-    ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, canvas.height); ctx.stroke();
-  }
-
-  // Path with glow
-  ctx.strokeStyle = '#3a3a3a';
-  ctx.lineWidth = 36;
-  ctx.lineCap = 'round';
-  ctx.beginPath();
-  ctx.moveTo(path[0].x, path[0].y);
-  path.forEach(p => ctx.lineTo(p.x, p.y));
-  ctx.stroke();
-
-  ctx.strokeStyle = '#555';
-  ctx.lineWidth = 28;
-  ctx.stroke();
+  // Path
+  ctx.strokeStyle='#444'; ctx.lineWidth=32; ctx.lineCap='round';
+  ctx.beginPath(); ctx.moveTo(path[0].x,path[0].y);
+  path.forEach(p=>ctx.lineTo(p.x,p.y)); ctx.stroke();
 
   // Base
-  ctx.fillStyle = '#1abc9c';
-  ctx.shadowColor = '#1abc9c';
-  ctx.shadowBlur = 15;
-  ctx.fillRect(820, 370, 50, 90);
-  ctx.shadowBlur = 0;
-  ctx.fillStyle = 'white';
-  ctx.font = 'bold 13px sans-serif';
-  ctx.fillText('BASE', 828, 420);
+  ctx.fillStyle='#1abc9c'; ctx.fillRect(730,350,50,80);
+  ctx.fillStyle='#fff'; ctx.font='12px sans-serif'; ctx.fillText('BASE',738,395);
 
-  // Enemies
-  enemies = enemies.filter(e => {
-    if (e.hp <= 0) {
-      spawnParticles(e.x, e.y, '#e74c3c', 15);
-      return false;
-    }
-
-    const target = path[e.pathIndex + 1];
-    if (!target) {
-      baseHP -= 8;
-      spawnParticles(e.x, e.y, '#e74c3c', 20);
-      updateUI();
-      if (baseHP <= 0) {
-        alert('Base Hancur! Refresh halaman untuk ulang.');
-        baseHP = 0;
-      }
-      return false;
-    }
-
-    const dx = target.x - e.x;
-    const dy = target.y - e.y;
-    const dist = Math.hypot(dx, dy);
-    if (dist < e.speed) e.pathIndex++;
-    else {
-      e.x += (dx / dist) * e.speed;
-      e.y += (dy / dist) * e.speed;
-    }
-
-    // Wobble animation
-    const wob = Math.sin(frame * 0.2 + e.wobble) * 3;
-
-    ctx.fillStyle = '#c0392b';
-    ctx.beginPath();
-    ctx.arc(e.x, e.y + wob, 13, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.strokeStyle = '#922';
-    ctx.lineWidth = 2;
-    ctx.stroke();
-
-    // HP bar
-    ctx.fillStyle = '#333';
-    ctx.fillRect(e.x - 16, e.y - 22, 32, 5);
-    ctx.fillStyle = '#2ecc71';
-    ctx.fillRect(e.x - 16, e.y - 22, 32 * (e.hp / e.maxHp), 5);
-
+  // Enemies logic (same as before, simplified)
+  enemies = enemies.filter(e=>{
+    if(e.hp<=0){ spawnParticles(e.x,e.y,'#e74c3c',12); return false; }
+    const tgt = path[e.pathIndex+1];
+    if(!tgt){ baseHP-=10; spawnParticles(e.x,e.y,'#c0392b',15); return false; }
+    const dx=tgt.x-e.x, dy=tgt.y-e.y, d=Math.hypot(dx,dy);
+    if(d<2) e.pathIndex++; else { e.x+=(dx/d)*e.speed; e.y+=(dy/d)*e.speed; }
+    const w=Math.sin(frame*0.15+e.wobble)*2;
+    ctx.fillStyle='#c0392b'; ctx.beginPath(); ctx.arc(e.x,e.y+w,12,0,Math.PI*2); ctx.fill();
+    ctx.fillStyle='#2ecc71'; ctx.fillRect(e.x-14,e.y-20,28*(e.hp/e.maxHp),4);
     return true;
   });
 
-  // Towers
-  towers.forEach(t => {
-    const pulse = 1 + Math.sin(frame * 0.1) * 0.05;
-    ctx.save();
-    ctx.translate(t.x, t.y);
-    ctx.scale(pulse, pulse);
-
-    if (t.type === 'totem') {
-      ctx.fillStyle = '#d35400';
-      ctx.beginPath();
-      ctx.moveTo(0, -18);
-      ctx.lineTo(12, 10);
-      ctx.lineTo(-12, 10);
-      ctx.closePath();
-      ctx.fill();
-      ctx.fillStyle = '#e67e22';
-      ctx.fillRect(-6, 4, 12, 10);
-    } else {
-      ctx.fillStyle = '#27ae60';
-      ctx.beginPath();
-      ctx.arc(0, 0, 14, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.fillStyle = '#2ecc71';
-      ctx.beginPath();
-      ctx.arc(-5, -4, 4, 0, Math.PI * 2);
-      ctx.arc(5, -4, 4, 0, Math.PI * 2);
-      ctx.fill();
-    }
-    ctx.restore();
-
-    // Range indicator when hovering logic skipped for simplicity
-    ctx.strokeStyle = 'rgba(255,255,255,0.08)';
-    ctx.beginPath();
-    ctx.arc(t.x, t.y, t.range, 0, Math.PI * 2);
-    ctx.stroke();
-
+  towers.forEach(t=>{
+    ctx.fillStyle = t.type==='totem'?'#e67e22':'#27ae60';
+    ctx.beginPath(); ctx.arc(t.x,t.y,15,0,Math.PI*2); ctx.fill();
     t.cooldown--;
-    if (t.cooldown <= 0) {
-      const target = enemies.find(en => Math.hypot(en.x - t.x, en.y - t.y) < t.range);
-      if (target) {
-        projectiles.push({
-          x: t.x, y: t.y,
-          tx: target.x, ty: target.y,
-          damage: t.type === 'totem' ? 9 : 4,
-          type: t.type,
-          life: 60
-        });
-        t.cooldown = t.type === 'totem' ? 35 : 55;
-        spawnParticles(t.x, t.y, t.type === 'totem' ? '#f39c12' : '#2ecc71', 4);
+    if(t.cooldown<=0){
+      const tgt=enemies.find(en=>Math.hypot(en.x-t.x,en.y-t.y)<t.range);
+      if(tgt){
+        projectiles.push({x:t.x,y:t.y,tx:tgt.x,ty:tgt.y,dmg:t.type==='totem'?10:5,type:t.type});
+        t.cooldown=t.type==='totem'?30:50;
       }
     }
   });
 
-  // Projectiles
-  projectiles = projectiles.filter(p => {
-    const dx = p.tx - p.x;
-    const dy = p.ty - p.y;
-    const dist = Math.hypot(dx, dy);
-    if (dist < 8 || p.life-- <= 0) {
-      const hit = enemies.find(e => Math.hypot(e.x - p.tx, e.y - p.ty) < 25);
-      if (hit) {
-        hit.hp -= p.damage;
-        spawnParticles(p.x, p.y, p.type === 'totem' ? '#f1c40f' : '#2ecc71', 6);
-      }
+  projectiles=projectiles.filter(p=>{
+    const dx=p.tx-p.x,dy=p.ty-p.y,d=Math.hypot(dx,dy);
+    if(d<10){
+      const h=enemies.find(e=>Math.hypot(e.x-p.tx,e.y-p.ty)<30);
+      if(h) h.hp-=p.dmg;
+      spawnParticles(p.x,p.y,p.type==='totem'?'#f1c40f':'#2ecc71',5);
       return false;
     }
-    p.x += (dx / dist) * 7;
-    p.y += (dy / dist) * 7;
-
-    ctx.fillStyle = p.type === 'totem' ? '#f39c12' : '#2ecc71';
-    ctx.shadowColor = ctx.fillStyle;
-    ctx.shadowBlur = 8;
-    ctx.beginPath();
-    ctx.arc(p.x, p.y, 5, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.shadowBlur = 0;
+    p.x+=(dx/d)*8; p.y+=(dy/d)*8;
+    ctx.fillStyle=p.type==='totem'?'#f39c12':'#2ecc71';
+    ctx.beginPath(); ctx.arc(p.x,p.y,4,0,Math.PI*2); ctx.fill();
     return true;
   });
 
-  // Particles
-  particles = particles.filter(p => {
-    p.x += p.vx;
-    p.y += p.vy;
-    p.life--;
-    p.vy += 0.05;
-    ctx.globalAlpha = p.life / 40;
-    ctx.fillStyle = p.color;
-    ctx.fillRect(p.x, p.y, 3, 3);
-    ctx.globalAlpha = 1;
-    return p.life > 0;
+  particles=particles.filter(p=>{
+    p.x+=p.vx; p.y+=p.vy; p.life--;
+    ctx.globalAlpha=p.life/30; ctx.fillStyle=p.color; ctx.fillRect(p.x,p.y,3,3); ctx.globalAlpha=1;
+    return p.life>0;
   });
 
-  if (waveActive && enemies.length === 0) {
-    waveActive = false;
+  document.getElementById('bat-res').textContent = resource;
+
+  if(waveActive && enemies.length===0){
+    waveActive=false;
     wave++;
-    resource += 15; // sedikit bonus antar wave (bukan dari kill)
-    updateUI();
+    if(currentMode==='mining' && wave>3){
+      // Success mining upgrade
+      miningLevels[miningType]++;
+      warehouse += 30;
+      alert(`Mining ${miningType} naik ke Lv.${miningLevels[miningType]}!`);
+      showMenu();
+      return;
+    }
+    if(currentMode==='campaign' && wave>5){
+      warehouse += 25;
+      alert('Campaign map selesai!');
+      showMenu();
+      return;
+    }
+    resource += 10;
   }
+
+  if(baseHP<=0){ alert('Gagal! Base hancur.'); showMenu(); }
 
   requestAnimationFrame(gameLoop);
 }
 
-updateUI();
+updateMenu();
+showMenu();
 gameLoop();
 </script>
 </body>
